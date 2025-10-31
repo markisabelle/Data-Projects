@@ -1,0 +1,217 @@
+---
+title: "Sales Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(readxl)
+library(shiny)
+library(shinyWidgets)
+library(DT)
+```
+
+```{r}
+# Command + Option + I OR CTRL + ALT + I
+data01 <- read_excel("Module2.xlsx")
+
+data02 <- data01 %>% 
+    select(date, order, state, qty, p_price, totprice,
+           c1:material)
+
+plot <- reactive({
+  
+  data02 %>% 
+    filter(date %>% between(
+      left = input$date_range[1], right = input$date_range[2]
+    )) %>% 
+    filter(c1 %in% input$checkbox_c1) %>% 
+    filter(c2 %in% input$picker_c2) %>% 
+    group_by(state) %>% 
+    summarise(
+        total_revenue = sum(totprice)
+    ) %>% 
+    ungroup() %>% 
+    mutate(label_text =str_glue(
+        "State: {state}
+        Total Revenue: {scales::dollar(total_revenue)}"
+    ))
+  
+})
+```
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+```{r}
+dateRangeInput(
+    inputId = "date_range", 
+    label   = h4("Date Range"),
+    start   = min(data02$date), 
+    end     = max(data02$date), 
+    min     = min(data02$date), 
+    max     = max(data02$date), 
+    startview = "year")
+
+shinyWidgets::checkboxGroupButtons(
+    inputId   = "checkbox_c1",
+    label     = h4("Category 1"),
+    choices   = unique(data02$c1),
+    selected  = unique(data02$c1),
+    checkIcon = list(
+        yes = icon("ok", lib = "glyphicon"),
+        no  = icon("remove", lib = "glyphicon")
+    ))
+
+shinyWidgets::pickerInput(
+    inputId  = "picker_c2",
+    label    = h4("Category 2"),
+    choices  = unique(data02$c2),
+    selected = unique(data02$c2),
+    multiple = TRUE,
+    options  = list(
+        `actions-box` = TRUE,
+        size = 10,
+        `selected-text-format` = "count > 2"
+    )
+)
+
+br()
+hr()
+br()
+
+actionButton(inputId = "reset", label = "Reset", icon = icon("sync"))
+
+observeEvent(eventExpr = input$reset, handlerExpr = {
+    
+    updateDateRangeInput(
+        session = session,
+        inputId = "date_range",
+        start   = min(data02$date),
+        end     = max(data02$date))
+    
+    updateCheckboxGroupButtons(
+        session  = session,
+        inputId  = "checkbox_c1",
+        selected = unique(data02$c1))
+    
+    updatePickerInput(
+        session = session,
+        inputId = "picker_c2",
+        selected = unique(data02$c2))
+    
+        
+})
+```
+
+Row {data-width=650}
+-----------------------------------------------------------------------
+```{r}
+summary <- reactive({
+  
+  data02 %>% 
+    filter(date %>% between(left = input$date_range[1],
+                            right = input$date_range[2])) %>% 
+    filter(c1 %in% input$checkbox_c1) %>% 
+    filter(c2 %in% input$picker_c2) %>% 
+    
+    summarise(
+      
+      total_revenue = sum(totprice),
+      total_orders = unique(order) %>% length()
+      
+    ) %>% 
+    
+    mutate(
+      
+      total_revenue = total_revenue %>% scales::dollar(),
+      total_orders = total_orders %>% scales::number(big.mark = ",")
+      
+    )
+})
+```
+
+### A
+```{r}
+renderValueBox({
+  
+  valueBox(
+    value = summary()$total_revenue,
+    caption = "Total Revenue",
+    color = "lightyellow"
+  )
+  
+})
+```
+
+### B
+```{r}
+renderValueBox({
+  
+  valueBox(
+    value = summary()$total_orders,
+    caption = "Total Orders",
+    color = "lightgreen"
+  )
+  
+})
+```
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Chart A
+
+```{r}
+renderPlotly(expr = {
+  
+  plot() %>% 
+    plot_geo(locationmode = "USA-states") %>% 
+    layout(
+        geo = list(scope = "usa")
+    ) %>% 
+    add_trace(
+        z = ~total_revenue,
+        locations = ~state,
+        text = ~label_text,
+        colors = "Greens"
+    ) %>% 
+    hide_colorbar()
+  
+})
+```
+
+### Summary Secondary Category
+```{r}
+summary_c2 <- reactive({
+  
+  data02 %>% 
+    filter(date %>% between(
+      left = input$date_range[1], right = input$date_range[2]
+    )) %>% 
+    filter(c1 %in% input$checkbox_c1) %>% 
+    filter(c2 %in% input$picker_c2) %>% 
+    group_by(c2) %>% 
+    summarise(total_revenue = sum(totprice)) %>% 
+    ungroup() %>% 
+    mutate(total_revenue = scales::dollar(total_revenue)) %>% 
+    rename(
+      `Category 2` = c2,
+      `Total Revenue` = total_revenue
+    )
+  
+})
+
+DT::renderDataTable(expr = {
+  
+  summary_c2()
+  
+})
+```
+
